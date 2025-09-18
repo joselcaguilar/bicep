@@ -18,4 +18,6 @@ public interface IArmDeploymentProvider
     Task<LocalDeploymentResult> CheckDeploymentStack(RootConfiguration configuration, DeploymentLocator deploymentLocator, CancellationToken cancellationToken);
 
     Task StartDeploymentStack(RootConfiguration configuration, DeploymentLocator deploymentLocator, string templateString, string parametersString, StacksConfig stacksConfig, CancellationToken cancellationToken);
+
+    Task<string?> GetDeploymentStackDescription(RootConfiguration configuration, DeploymentLocator deploymentLocator, CancellationToken cancellationToken);
 }

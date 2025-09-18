@@ -43,7 +43,7 @@ public class ArmDeploymentProvider(
             _ => throw new NotImplementedException("Above-subscription scope is not supported yet."),
         };
     }
- 
+
     private DeploymentStackCollection GetDeploymentStacksClient(RootConfiguration configuration, DeploymentLocator deploymentLocator)
     {
         var armClient = armClientProvider.CreateArmClient(configuration, deploymentLocator.SubscriptionId);
@@ -139,5 +139,20 @@ public class ArmDeploymentProvider(
         }
 
         return await CheckDeployment(configuration, deploymentLocator with { DeploymentName = entrypointDeploymentId.Split('/').Last(), }, cancellationToken);
+    }
+
+    public async Task<string?> GetDeploymentStackDescription(RootConfiguration configuration, DeploymentLocator deploymentLocator, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stacksClient = GetDeploymentStacksClient(configuration, deploymentLocator);
+            var response = await stacksClient.GetAsync(deploymentLocator.DeploymentName, cancellationToken);
+            return response.Value.Data.Description;
+        }
+        catch
+        {
+            // Stack doesn't exist or we don't have permissions
+            return null;
+        }
     }
 }
