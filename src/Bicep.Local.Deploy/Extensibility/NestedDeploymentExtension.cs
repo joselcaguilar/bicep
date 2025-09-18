@@ -200,7 +200,7 @@ public class NestedDeploymentExtension(
             {
                 case "never":
                     // Skip deployment - return a mock successful response
-                    throw new InvalidOperationException("Stack deployments skipped.");
+                    throw new InvalidOperationException("Stack deployment skipped.");
 
                 case "onchange":
                     // Check if deployment should proceed based on hash comparison
