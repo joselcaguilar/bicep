@@ -195,10 +195,36 @@ public class NestedDeploymentExtension(
 
             await armDeploymentProvider.CreateResourceGroup(configuration, locator, region!, cancellationToken);
 
-            await armDeploymentProvider.StartDeploymentStack(configuration, locator, templateFile, paramsResult.Parameters, stacksConfig, cancellationToken);
-            var result = await armDeploymentProvider.CheckDeploymentStack(configuration, locator, cancellationToken);
+            // Handle deploy conditions: never, onChange, always
+            switch (deploy?.ToLowerInvariant())
+            {
+                case "never":
+                    // Skip deployment - return a mock successful response
+                    throw new InvalidOperationException("Stack deployments skipped.");
 
-            return GetResponse(request.Type, request.ApiVersion, identifiers, result);
+                case "onchange":
+                    // Check if deployment should proceed based on hash comparison
+                    var (exists, existingDescription) = await CheckExistingDeploymentStack(identifiers, cancellationToken);
+                    if (exists && !ShouldDeployBasedOnHashComparison(descriptionJson.ToJson(), existingDescription))
+                    {
+                        // No changes detected - skip deployment
+                        throw new InvalidOperationException("Template and params are the same, Stack deployment skipped.");
+                    }
+                    // If deployment doesn't exist or changes detected, proceed with deployment
+                    await armDeploymentProvider.StartDeploymentStack(configuration, locator, templateFile, paramsResult.Parameters, stacksConfig, cancellationToken);
+                    var result = await armDeploymentProvider.CheckDeploymentStack(configuration, locator, cancellationToken);
+
+                    return GetResponse(request.Type, request.ApiVersion, identifiers, result);
+
+                case "always":
+                default:
+                    // Always deploy (default behavior)
+                    await armDeploymentProvider.StartDeploymentStack(configuration, locator, templateFile, paramsResult.Parameters, stacksConfig, cancellationToken);
+                    var defaultResult = await armDeploymentProvider.CheckDeploymentStack(configuration, locator, cancellationToken);
+
+                    return GetResponse(request.Type, request.ApiVersion, identifiers, defaultResult);
+            }
+
         }
         catch (Exception ex)
         {
@@ -301,6 +327,61 @@ public class NestedDeploymentExtension(
 
     public Task<TypeFiles> GetTypeFiles(CancellationToken cancellationToken)
         => throw new InvalidOperationException($"Extension {nameof(NestedDeploymentExtension)} does not support type files.");
+
+    private async Task<(bool exists, string? description)> CheckExistingDeploymentStack(
+        DeploymentIdentifiers identifiers,
+        CancellationToken cancellationToken)
+    {
+        if (identifiers.SubscriptionId is null || identifiers.SourceUri is null)
+        {
+            return (false, null);
+        }
+
+        try
+        {
+            GuardHelper.ArgumentNotNull(identifiers.SourceUri);
+            var configuration = configurationManager.GetConfiguration(new Uri(identifiers.SourceUri).ToIOUri());
+            DeploymentLocator locator = new("", null, identifiers.SubscriptionId, identifiers.ResourceGroup, identifiers.Name);
+
+            var description = await armDeploymentProvider.GetDeploymentStackDescription(configuration, locator, cancellationToken);
+            return (description != null, description);
+        }
+        catch
+        {
+            // Stack doesn't exist or we don't have permissions
+            return (false, null);
+        }
+    }
+
+    private bool ShouldDeployBasedOnHashComparison(string currentDescription, string? existingDescription)
+    {
+        if (string.IsNullOrEmpty(existingDescription))
+        {
+            // No existing deployment, should deploy
+            return true;
+        }
+
+        try
+        {
+            var currentHashes = currentDescription.FromJson<JObject>();
+            var existingHashes = existingDescription.FromJson<JObject>();
+
+            var currentTemplateHash = currentHashes?["templateHash"]?.Value<string>();
+            var currentParametersHash = currentHashes?["parametersHash"]?.Value<string>();
+
+            var existingTemplateHash = existingHashes?["templateHash"]?.Value<string>();
+            var existingParametersHash = existingHashes?["parametersHash"]?.Value<string>();
+
+            // Deploy if either hash has changed
+            return currentTemplateHash != existingTemplateHash ||
+                   currentParametersHash != existingParametersHash;
+        }
+        catch
+        {
+            // If we can't parse the hashes, assume we should deploy
+            return true;
+        }
+    }
 
     public record UsingConfig(
         string? Name,
